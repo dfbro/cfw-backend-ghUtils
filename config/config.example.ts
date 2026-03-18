@@ -6,7 +6,11 @@ interface Config {
     USER_TABLE: string;
     JWT_SECRET: string;
     DB_V0_CONTROL_KEY?: string;
-    GH_TOKEN: string;
+    GH: {
+        OWNER: string;
+        REPO: string;
+        TOKEN: string;
+    }
 }
 
 const APP_CONFIG: Config = {
@@ -14,7 +18,11 @@ const APP_CONFIG: Config = {
     USER_TABLE: '',
     JWT_SECRET: '',
     DB_V0_CONTROL_KEY: '',
-    GH_TOKEN: ''
+    GH: {
+        OWNER: '',
+        REPO: '',
+        TOKEN: ''
+    }
 } as const
 
 export default APP_CONFIG

@@ -3,10 +3,12 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import v1 from './v1'
 import v0 from './v0'
+import v2 from './v2'
 const app = new Hono()
 
 app.route('/v1', v1)
 app.route('/v0', v0)
+app.route('/v2', v2)
 app.get('/', (c) => {
   c.header('content-type', 'application/json')
   return c.json({
