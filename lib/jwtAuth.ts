@@ -18,7 +18,10 @@ export const jwtAuth = (secret: string): MiddlewareHandler => {
         const jwtMiddleware = jwt({
             secret: secret,
             alg: 'HS256',
-            cookie: 'session_token'
+            cookie: 'session_token',
+            verification: {
+                exp: true
+            }
         })
 
         try {
