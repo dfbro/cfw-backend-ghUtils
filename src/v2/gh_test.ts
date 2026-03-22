@@ -25,7 +25,7 @@ ghUtilsEndpoint.get('/', async (c) => {
 ghUtilsEndpoint.get('/by-name/:file-name', async (c) => {
     const path = c.req.param('file-name')
 
-    const asset = await getAssetByName(path)
+    const asset = await getAssetByName(path, { Tag: GH_CONFIG.Release_Tag })
     if (!asset.isOK) {
         return c.json({ error: asset.error }, 404)
     }
@@ -55,11 +55,11 @@ ghUtilsEndpoint.get('/by-name/:file-name', async (c) => {
 
 ghUtilsEndpoint.delete('/by-name/:filename', async (c) => {
     const filename = c.req.param('filename')
-    const existsResult = await checkAssetExists(filename)
+    const existsResult = await checkAssetExists(filename, { Tag: GH_CONFIG.Release_Tag })
     if (!existsResult.doesExist) {
         return c.json({ error: 'Asset not found' }, 404)
     }
-    const result = await deleteAssetByName(filename)
+    const result = await deleteAssetByName(filename, { Tag: GH_CONFIG.Release_Tag })
     if (!result.isOK) {
         return c.json({ error: result.error }, 500)
     }
@@ -76,7 +76,7 @@ ghUtilsEndpoint.put('/by-name/:filename', async (c) => {
         return c.json({ error: 'No stream data' }, 400)
     }
 
-    const result = await uploadAssetStream(filename, stream, contentType)
+    const result = await uploadAssetStream(filename, stream, contentType, { Tag: GH_CONFIG.Release_Tag })
 
     if (!result.isOK) {
         return c.json({ error: result.error, originErrors: result.originErr }, (result.originErrStatusCode || 500) as any)

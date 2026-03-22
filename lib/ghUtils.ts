@@ -12,36 +12,59 @@ const getGithubHeaders = (token: string, accept = 'application/vnd.github+json')
     'User-Agent': 'Hono-Static-Proxy'
 });
 
+
+
+
+// ==========================================
+// VALIDATORS
+// ==========================================
+export const isValidTag = (tag: string): boolean => {
+    if (!tag) return false
+
+    // Single '@' sendirian
+    if (tag === '@') return false
+
+    // ASCII control characters (< \040) dan DEL (\177)
+    if (/[\x00-\x1f\x7f]/.test(tag)) return false
+
+    // Karakter terlarang: spasi, ~, ^, :, ?, *, [, \
+    if (/[ ~^:?*\[\\]/.test(tag)) return false
+
+    // Sequence @{
+    if (/@\{/.test(tag)) return false
+
+    // Double dot ..
+    if (/\.\./.test(tag)) return false
+
+    // Akhiri dengan dot
+    if (/\.$/.test(tag)) return false
+
+    // Akhiri dengan .lock
+    if (/\.lock$/i.test(tag)) return false
+
+    // Diawali atau diakhiri /
+    if (/^\//.test(tag)) return false
+    if (/\/$/.test(tag)) return false
+
+    // Double slash //
+    if (/\/\//.test(tag)) return false
+
+    // Komponen diawali dot (awal string atau setelah /)
+    if (/(^|\/)\./.test(tag)) return false
+
+    return true
+}
+
+
 // ==========================================
 // INTERFACES & TYPES
 // ==========================================
 
 export interface GetReleaseOptions {
-    Tag?: string;
+    Tag: string;
     Token?: string;
     Owner?: string;
     Repo?: string;
-}
-
-export interface GHRelease {
-    tag_name: string;
-    created_at: string;
-    updated_at: string;
-    id: number;
-    url: string;
-    assets_url: string;
-    upload_url: string;
-    assets?: Array<{
-        id: number;
-        name: string;
-        content_type: string;
-        browser_download_url: string;
-        created_at: string;
-        updated_at: string;
-        size: number;
-        digest: string;
-        url: string;
-    }>;
 }
 
 export interface GHAssetSuccess {
@@ -88,16 +111,101 @@ export interface UploadGHAssetResponse {
 }
 
 
+
+
+
+
+
+
+
+
+
+export interface deleteGHReleaseSuccess {
+    isOK: true;
+    message: string;
+    isTagFound: true;
+}
+
+export interface deleteGHReleaseError {
+    isOK: false;
+    error: string;
+    originErr?: unknown;
+    isTagFound?: boolean;
+    originErrStatusCode?: number;
+    isExpectedError?: boolean;
+}
+
+export type DeleteGHReleaseResult = deleteGHReleaseSuccess | deleteGHReleaseError;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export interface GHRelease {
+    message?: string;
+    tag_name: string;
+    created_at: string;
+    updated_at: string;
+    id: number;
+    url: string;
+    isOK: true;
+    assets_url: string;
+    upload_url: string;
+    assets?: Array<{
+        id: number;
+        name: string;
+        content_type: string;
+        browser_download_url: string;
+        created_at: string;
+        updated_at: string;
+        size: number;
+        digest: string;
+        url: string;
+    }>;
+}
+
+export interface GHReleaseNotFound {
+    error: string
+    isNotFound: true
+    originErr: Response | null
+    isOK: false
+    originErrStatusCode: number
+}
+
+
+export interface GHReleaseFetchError {
+    error: string
+    originErr: unknown
+    isLikelyNotFound?: true
+    isOK: false
+    originErrStatusCode: number
+}
+
+export type GHReleaseResult = GHRelease | GHReleaseNotFound | GHReleaseFetchError 
+
+
 // ==========================================
 // FUNCTIONS
 // ==========================================
 
 export const getReleaseByTag = async ({
-    Tag = Release_Tag,
+    Tag,
     Token = TOKEN,
     Owner = OWNER,
     Repo = REPO
-}: GetReleaseOptions = {}): Promise<GHRelease | null> => {
+}: GetReleaseOptions): Promise<GHReleaseResult> => {
+    
     const ghUrl = `https://api.github.com/repos/${Owner}/${Repo}/releases/tags/${Tag}`;
 
     try {
@@ -106,31 +214,29 @@ export const getReleaseByTag = async ({
         });
 
         if (!response.ok) {
-            console.error('Release not found:', response.statusText);
-            return null;
+            return { error: 'Release/Tag not found', originErr: response, isNotFound: true, isOK: false, originErrStatusCode: response.status };
         }
 
         return await response.json() as GHRelease;
     } catch (err) {
-        console.error('Error fetching release from GitHub:', err);
-        return null;
+        return { error: 'Error fetching release', originErr: err, isLikelyNotFound: true, isOK: false, originErrStatusCode: 500 };
     }
 };
 
 
 export const getAssetByName = async (
     name: string,
-    { Tag = Release_Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions = {}
+    { Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions
 ): Promise<GHAsset> => {
     const release = await getReleaseByTag({ Tag, Token, Owner, Repo });
 
-    if (!release || !release.assets) {
-        return { error: 'Release not found', isOK: false };
+    if (!('tag_name' in release)) {
+        return { error: release.error, originErr: release.originErr, isOK: false, originErrStatusCode: release.originErrStatusCode };
     }
 
-    const objectData = release.assets.find(asset => asset.name === name);
+    const objectData = release.assets?.find(asset => asset.name === name);
     if (!objectData) {
-        return { error: 'Asset not found in release', isOK: false };
+        return { error: 'Asset not found in release', isOK: false, originErrStatusCode: 404 };
     }
 
     return {
@@ -144,7 +250,7 @@ export const getAssetByName = async (
 
 export const checkAssetExists = async (
     name: string,
-    options: GetReleaseOptions = {}
+    options: GetReleaseOptions
 ): Promise<CheckAssetExistsResult> => {
     const check = await getAssetByName(name, options);
     return { doesExist: check.isOK };
@@ -153,7 +259,7 @@ export const checkAssetExists = async (
 
 export const deleteAssetByName = async (
     name: string,
-    { Tag = Release_Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions = {}
+    { Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions
 ): Promise<DeleteGHAssetResult> => {
     // 1. Cari dulu asset-nya untuk mendapatkan objectUrl
     const asset = await getAssetByName(name, { Tag, Token, Owner, Repo });
@@ -177,14 +283,118 @@ export const deleteAssetByName = async (
         }
 
         const errorData = await response.json();
-        console.error('Failed to delete asset:', errorData);
         return { error: 'Failed to delete asset', details: errorData, isOK: false };
 
     } catch (err) {
-        console.error('Error deleting asset:', err);
         return { error: 'Internal Server Error', isOK: false };
     }
 };
+
+
+
+
+export interface createReleaseFetchResultFail {
+    message: string;
+    errors?: Array<{ resource: string; code: string; field: string; message: string }>;
+}
+
+
+export interface createReleaseFail {
+    error: string;
+    originErr: createReleaseFetchResultFail | unknown;
+    isOK: false;
+    originErrStatusCode: number;
+}
+
+
+export const createRelease = async (
+    { Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions
+): Promise<GHReleaseResult> => {
+    const ghUrl = `https://api.github.com/repos/${Owner}/${Repo}/releases`;
+
+    try {
+        const response = await fetch(ghUrl, {
+            method: 'POST',
+            headers: getGithubHeaders(Token),
+            body: JSON.stringify({
+                tag_name: Tag,
+                name: Tag,
+                body: `Release for tag ${Tag}`,
+                draft: false,
+                prerelease: false
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json() as createReleaseFetchResultFail;
+            return { error: 'Failed to create release', originErr: errorData, isOK: false, originErrStatusCode: response.status };
+        }
+
+        const releaseData = await response.json() as GHRelease
+        return { ...releaseData, isOK: true };
+
+
+    } catch (err) {
+        console.error('Error creating release:', err);
+        return { error: 'Internal Server Error', originErr: err, isOK: false, originErrStatusCode: 500 };
+    }
+
+}
+
+export const deleteReleaseByTag = async (
+    { Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions
+): Promise<DeleteGHReleaseResult> => {
+    const releaseResult = await getReleaseByTag({ Tag, Token, Owner, Repo });
+
+
+    if (!('tag_name' in releaseResult) && 'isNotFound' in releaseResult && releaseResult.isNotFound) {
+        return { error: releaseResult.error, isOK: false, isTagFound: false, isExpectedError: true };
+    }
+    if (!('tag_name' in releaseResult)) {
+        return { error: releaseResult.error, originErr: releaseResult.originErr, isOK: false, originErrStatusCode: releaseResult.originErrStatusCode };
+    }
+
+    const releaseId = releaseResult.id;
+    const deleteUrl = `https://api.github.com/repos/${Owner}/${Repo}/releases/${releaseId}`;
+
+    try {
+        const response = await fetch(deleteUrl, {
+            method: 'DELETE',
+            headers: getGithubHeaders(Token)
+        });
+
+        if (response.status === 204) {
+            return { message: `Release with tag '${Tag}' deleted successfully`, isOK: true, isTagFound: true };
+        }
+
+        if (response.status === 404) {
+            return { error: `Release with tag '${Tag}' not found`, isOK: false, originErr: response, originErrStatusCode: 404, isTagFound: false, isExpectedError: true };
+        }
+        const errorData = await response.json();
+        console.error('Failed to delete release:', errorData);
+        return { error: 'Failed to delete release', originErr: errorData, isOK: false, originErrStatusCode: response.status, isExpectedError: false };
+
+    } catch (err) {
+        console.error('Error deleting release:', err);
+        return { error: 'Internal Server Error', originErr: err, isOK: false, originErrStatusCode: 500, isExpectedError: false };
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 // Fungsi upload yang menerima ReadableStream
@@ -192,11 +402,11 @@ export const uploadAssetStream = async (
     name: string,
     fileStream: ReadableStream, // Terima stream langsung
     contentType: string,
-    { Tag = Release_Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions = {}
+    { Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions
 ): Promise<GHAsset> => {
 
     const release = await getReleaseByTag({ Tag, Token, Owner, Repo });
-    if (!release) return { error: 'Release not found', isOK: false };
+    if (!('tag_name' in release)) return { error: release.error, originErr: release.originErr, isOK: false };
 
     const uploadUrl = release.upload_url.replace('{?name,label}', `?name=${encodeURIComponent(name)}`);
 
