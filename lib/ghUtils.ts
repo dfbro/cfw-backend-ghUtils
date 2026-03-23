@@ -2,6 +2,12 @@ import { GH_CONFIG } from '@/config/config';
 
 const { OWNER, REPO, TOKEN, Release_Tag } = GH_CONFIG;
 
+const RELEASE_CACHE_TTL_MS = 10_000;
+type ReleaseCacheEntry = { expiresAt: number; value: GHReleaseResult };
+const releaseByTagCache = new Map<string, ReleaseCacheEntry>();
+
+const getReleaseCacheKey = (owner: string, repo: string, tag: string) => `${owner}/${repo}#${tag}`;
+
 /**
  * Helper untuk membuat GitHub API Headers secara konsisten
  */
@@ -205,19 +211,29 @@ export const getReleaseByTag = async ({
     Owner = OWNER,
     Repo = REPO
 }: GetReleaseOptions): Promise<GHReleaseResult> => {
-    
+    const cacheKey = getReleaseCacheKey(Owner, Repo, Tag);
+    const cached = releaseByTagCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
     const ghUrl = `https://api.github.com/repos/${Owner}/${Repo}/releases/tags/${Tag}`;
 
     try {
         const response = await fetch(ghUrl, {
-            headers: getGithubHeaders(Token, 'application/vnd.github.v3.raw')
+            headers: getGithubHeaders(Token)
         });
 
         if (!response.ok) {
             return { error: 'Release/Tag not found', originErr: response, isNotFound: true, isOK: false, originErrStatusCode: response.status };
         }
 
-        return await response.json() as GHRelease;
+        const result = await response.json() as GHRelease;
+        releaseByTagCache.set(cacheKey, {
+            value: result,
+            expiresAt: Date.now() + RELEASE_CACHE_TTL_MS
+        });
+        return result;
     } catch (err) {
         return { error: 'Error fetching release', originErr: err, isLikelyNotFound: true, isOK: false, originErrStatusCode: 500 };
     }
@@ -331,7 +347,12 @@ export const createRelease = async (
         }
 
         const releaseData = await response.json() as GHRelease
-        return { ...releaseData, isOK: true };
+        const result: GHRelease = { ...releaseData, isOK: true };
+        releaseByTagCache.set(getReleaseCacheKey(Owner, Repo, Tag), {
+            value: result,
+            expiresAt: Date.now() + RELEASE_CACHE_TTL_MS
+        });
+        return result;
 
 
     } catch (err) {
@@ -364,6 +385,7 @@ export const deleteReleaseByTag = async (
         });
 
         if (response.status === 204) {
+            releaseByTagCache.delete(getReleaseCacheKey(Owner, Repo, Tag));
             return { message: `Release with tag '${Tag}' deleted successfully`, isOK: true, isTagFound: true };
         }
 
@@ -402,16 +424,19 @@ export const uploadAssetStream = async (
     name: string,
     fileStream: ReadableStream, // Terima stream langsung
     contentType: string,
-    { Tag, Token = TOKEN, Owner = OWNER, Repo = REPO }: GetReleaseOptions
+    { Tag, Token = TOKEN, Owner = OWNER, Repo = REPO, UploadUrl }: GetReleaseOptions & { UploadUrl?: string }
 ): Promise<GHAsset> => {
+    let uploadUrl = UploadUrl;
+    if (!uploadUrl) {
+        const release = await getReleaseByTag({ Tag, Token, Owner, Repo });
+        if (!('tag_name' in release)) return { error: release.error, originErr: release.originErr, isOK: false };
+        uploadUrl = release.upload_url;
+    }
 
-    const release = await getReleaseByTag({ Tag, Token, Owner, Repo });
-    if (!('tag_name' in release)) return { error: release.error, originErr: release.originErr, isOK: false };
-
-    const uploadUrl = release.upload_url.replace('{?name,label}', `?name=${encodeURIComponent(name)}`);
+    const uploadUrlWithName = uploadUrl.replace('{?name,label}', `?name=${encodeURIComponent(name)}`);
 
     try {
-        const response = await fetch(uploadUrl, {
+        const response = await fetch(uploadUrlWithName, {
             method: 'POST',
             headers: {
                 ...getGithubHeaders(Token),

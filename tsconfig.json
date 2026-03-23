@@ -10,7 +10,7 @@
       ]
     },
     "strict": true,
-    "types": ["@cloudflare/workers-types"],
+    "types": [],
     "skipLibCheck": true,
     "lib": [
       "ESNext",

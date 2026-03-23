@@ -4,7 +4,7 @@ import { HTTPException } from 'hono/http-exception'
 import v1 from './v1'
 import v0 from './v0'
 import v2 from './v2'
-const app = new Hono()
+const app = new Hono<{ Bindings: CloudflareBindings }>()
 
 app.route('/v1', v1)
 app.route('/v0', v0)

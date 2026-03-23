@@ -107,7 +107,7 @@ ghUtilsEndpoint.put('/by-name/:filename', async (c) => {
         return c.json({ error: createResult.error, originErrors: createResult.originErr }, (createResult.originErrStatusCode || 500) as any)
     }
 
-    const result = await uploadAssetStream(filename, stream, contentType, { Tag: filename })
+    const result = await uploadAssetStream(filename, stream, contentType, { Tag: filename, UploadUrl: createResult.upload_url })
     if (!result.isOK) {
         return c.json({ error: result.error, originErrors: result.originErr }, (result.originErrStatusCode || 500) as any)
     }
